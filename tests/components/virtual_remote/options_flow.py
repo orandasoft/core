@@ -10,6 +10,7 @@ from homeassistant.helpers import selector
 
 from .command import CommandParseError, validate_remote_command_payload
 from .const import (
+    CONF_INFRARED_ENTITY_ID,
     CONF_REMOTE_CODESET,
     CONF_REMOTE_COMMANDS,
     CONF_REMOTE_DEVICE_TYPE,
@@ -17,10 +18,13 @@ from .const import (
     DEVICE_TYPE_GENERIC,
 )
 from .helpers import (
+    available_infrared_entities,
     command_create_button,
     command_object,
     command_options,
     find_command_key,
+    infrared_entity_field_with_current,
+    infrared_entity_selector,
     normalize_command_mapping,
     normalize_command_name,
     normalize_command_objects,
@@ -34,8 +38,11 @@ from .infrared_library import (
     infrared_library_codeset_label,
     infrared_library_codeset_options,
     infrared_library_command_options,
+    infrared_library_device_type_options,
     is_infrared_library_codeset_selected,
     validate_generated_command_payload,
+    validate_infrared_library_codeset,
+    validate_infrared_library_device_type,
 )
 
 COMMAND_NAME = "command_name"
@@ -51,6 +58,7 @@ COMMAND_LIBRARY_COMMAND = "library_command"
 COMMAND_LIBRARY_COMMANDS = "library_commands"
 COMMAND_REPEAT_COUNT = "repeat_count"
 
+SOURCE_EDIT_REMOTE = "edit_remote"
 SOURCE_MANAGE_COMMANDS = "manage_commands"
 SOURCE_ADD_RAW_COMMAND = "add_raw_command"
 SOURCE_IMPORT_LIBRARY_COMMANDS = "import_library_commands"
@@ -101,7 +109,133 @@ class VirtualRemoteOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_menu(
             step_id="init",
-            menu_options=[SOURCE_MANAGE_COMMANDS],
+            menu_options=[SOURCE_EDIT_REMOTE, SOURCE_MANAGE_COMMANDS],
+        )
+
+    async def async_step_edit_remote(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Edit the configured virtual remote."""
+        errors: dict[str, str] = {}
+        remote = self._remote
+
+        if remote is None:
+            return self.async_abort(reason="no_virtual_remotes")
+
+        infrared_entities = available_infrared_entities(self.hass)
+        if not infrared_entities:
+            return self.async_abort(reason="no_available_infrared_entities")
+
+        current_name = str(remote[CONF_REMOTE_NAME])
+        current_entity_id = str(remote[CONF_INFRARED_ENTITY_ID])
+        current_device_type = str(
+            remote.get(CONF_REMOTE_DEVICE_TYPE, DEVICE_TYPE_GENERIC)
+        )
+        current_codeset = str(
+            remote.get(CONF_REMOTE_CODESET, NO_INFRARED_LIBRARY_CODESET)
+        )
+
+        if user_input is not None:
+            name = str(user_input[CONF_REMOTE_NAME]).strip()
+            infrared_entity_id = str(user_input[CONF_INFRARED_ENTITY_ID]).strip()
+            device_type = str(
+                user_input.get(CONF_REMOTE_DEVICE_TYPE, current_device_type)
+            )
+            codeset_id = str(
+                user_input.get(CONF_REMOTE_CODESET, NO_INFRARED_LIBRARY_CODESET)
+            )
+
+            if not name:
+                errors[CONF_REMOTE_NAME] = "remote_name_required"
+
+            if (
+                infrared_entity_id not in infrared_entities
+                and infrared_entity_id != current_entity_id
+            ):
+                errors[CONF_INFRARED_ENTITY_ID] = "infrared_entity_unavailable"
+
+            if not validate_infrared_library_device_type(device_type):
+                errors[CONF_REMOTE_DEVICE_TYPE] = "invalid_device_type"
+
+            if (
+                device_type != DEVICE_TYPE_GENERIC
+                and not validate_infrared_library_codeset(
+                    codeset_id,
+                    device_type=device_type,
+                )
+            ):
+                errors[CONF_REMOTE_CODESET] = "invalid_library_codeset"
+
+            if not errors:
+                remote[CONF_REMOTE_NAME] = name
+                remote[CONF_INFRARED_ENTITY_ID] = infrared_entity_id
+                remote[CONF_REMOTE_DEVICE_TYPE] = device_type
+                if (
+                    device_type != DEVICE_TYPE_GENERIC
+                    and is_infrared_library_codeset_selected(codeset_id)
+                ):
+                    remote[CONF_REMOTE_CODESET] = codeset_id
+                else:
+                    remote.pop(CONF_REMOTE_CODESET, None)
+                return self._create_options_entry()
+
+        remote_name_default = (
+            str(user_input.get(CONF_REMOTE_NAME, current_name))
+            if user_input
+            else current_name
+        )
+        infrared_entity_default = (
+            str(user_input.get(CONF_INFRARED_ENTITY_ID, current_entity_id))
+            if user_input
+            else current_entity_id
+        )
+        device_type_default = (
+            str(user_input.get(CONF_REMOTE_DEVICE_TYPE, current_device_type))
+            if user_input
+            else current_device_type
+        )
+        codeset_default = (
+            str(user_input.get(CONF_REMOTE_CODESET, current_codeset))
+            if user_input
+            else current_codeset
+        )
+
+        return self.async_show_form(
+            step_id=SOURCE_EDIT_REMOTE,
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_REMOTE_NAME, default=remote_name_default): str,
+                    infrared_entity_field_with_current(
+                        infrared_entity_default,
+                        infrared_entities,
+                    ): infrared_entity_selector(
+                        infrared_entities,
+                        current_entity_id=current_entity_id,
+                    ),
+                    vol.Required(
+                        CONF_REMOTE_DEVICE_TYPE,
+                        default=device_type_default,
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=infrared_library_device_type_options(),
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_REMOTE_CODESET,
+                        default=codeset_default,
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=infrared_library_codeset_options(
+                                include_none=True,
+                            ),
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
         )
 
     async def async_step_manage_commands(
@@ -819,9 +953,32 @@ class VirtualRemoteOptionsFlow(config_entries.OptionsFlow):
         if remote is None:
             return self.async_abort(reason="no_virtual_remotes")
 
+        data = dict(self._config_entry.data)
+        data[CONF_REMOTE_NAME] = remote[CONF_REMOTE_NAME]
+        data[CONF_INFRARED_ENTITY_ID] = remote[CONF_INFRARED_ENTITY_ID]
+        data[CONF_REMOTE_DEVICE_TYPE] = remote.get(
+            CONF_REMOTE_DEVICE_TYPE,
+            DEVICE_TYPE_GENERIC,
+        )
+        if is_infrared_library_codeset_selected(
+            codeset_id := str(
+                remote.get(CONF_REMOTE_CODESET, NO_INFRARED_LIBRARY_CODESET)
+            )
+        ):
+            data[CONF_REMOTE_CODESET] = codeset_id
+        else:
+            data.pop(CONF_REMOTE_CODESET, None)
+
+        self.hass.config_entries.async_update_entry(
+            self._config_entry,
+            title=str(remote[CONF_REMOTE_NAME]),
+            data=data,
+        )
+
         options = dict(self._config_entry.options)
 
         options.pop(CONF_REMOTE_NAME, None)
+        options.pop(CONF_INFRARED_ENTITY_ID, None)
         options.pop(CONF_REMOTE_CODESET, None)
         options.pop(CONF_REMOTE_DEVICE_TYPE, None)
 

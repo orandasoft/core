@@ -8,14 +8,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 
+from .command_ui import command_is_media_player_source
 from .const import (
     CONF_INFRARED_ENTITY_ID,
+    CONF_REMOTE_CODESET,
     CONF_REMOTE_COMMANDS,
+    CONF_REMOTE_DEVICE_TYPE,
     CONF_REMOTE_ID,
     CONF_REMOTE_NAME,
-    CONF_VIRTUAL_REMOTES,
+    DEVICE_TYPE_GENERIC,
+    DEVICE_TYPE_TV,
 )
-from .helpers import virtual_remotes_from_config_entry
+from .helpers import command_create_button, virtual_remotes_from_config_entry
+from .infrared_library import NO_INFRARED_LIBRARY_CODESET
 
 TO_REDACT = {"device_id", "unique_id", "uuid"}
 
@@ -43,20 +48,23 @@ async def async_get_config_entry_diagnostics(
             "command_count": sum(
                 remote["command_count"] for remote in remote_diagnostics
             ),
+            "button_count": sum(
+                remote["button_count"] for remote in remote_diagnostics
+            ),
+            "media_player_count": sum(
+                1 for remote in remote_diagnostics if remote["media_player_expected"]
+            ),
             "missing_infrared_entity_count": sum(
                 1
                 for remote in remote_diagnostics
-                if not remote["infrared_entity_exists"]
+                if not remote["infrared_entity_available"]
             ),
         },
     }
 
-    if CONF_REMOTE_ID in entry.data:
-        diagnostics_data["virtual_remote"] = (
-            remote_diagnostics[0] if remote_diagnostics else None
-        )
-    else:
-        diagnostics_data["virtual_remotes"] = remote_diagnostics
+    diagnostics_data["virtual_remote"] = (
+        remote_diagnostics[0] if remote_diagnostics else None
+    )
 
     return diagnostics_data
 
@@ -69,22 +77,6 @@ def _redacted_options(options: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(commands, dict):
         redacted[CONF_REMOTE_COMMANDS] = sorted(commands)
 
-    remotes = redacted.get(CONF_VIRTUAL_REMOTES)
-    if not isinstance(remotes, list):
-        return redacted
-
-    redacted_remotes: list[dict[str, Any]] = []
-    for item in remotes:
-        if not isinstance(item, dict):
-            continue
-
-        remote = dict(item)
-        remote_commands = remote.get(CONF_REMOTE_COMMANDS, {})
-        if isinstance(remote_commands, dict):
-            remote[CONF_REMOTE_COMMANDS] = sorted(remote_commands)
-        redacted_remotes.append(remote)
-
-    redacted[CONF_VIRTUAL_REMOTES] = redacted_remotes
     return redacted
 
 
@@ -97,18 +89,40 @@ def _diagnostic_remotes(
     for item in virtual_remotes_from_config_entry(entry):
         infrared_entity_id = item.get(CONF_INFRARED_ENTITY_ID)
         commands = item.get(CONF_REMOTE_COMMANDS, {})
+        command_names = sorted(commands) if isinstance(commands, dict) else []
+        button_count = (
+            sum(1 for command in commands.values() if command_create_button(command))
+            if isinstance(commands, dict)
+            else 0
+        )
+        source_count = sum(
+            1
+            for command_name in command_names
+            if command_is_media_player_source(command_name)
+        )
+        device_type = str(item.get(CONF_REMOTE_DEVICE_TYPE, DEVICE_TYPE_GENERIC))
+        infrared_state = (
+            hass.states.get(infrared_entity_id)
+            if isinstance(infrared_entity_id, str)
+            else None
+        )
         diagnostics.append(
             {
                 "id": item.get(CONF_REMOTE_ID),
                 "name": item.get(CONF_REMOTE_NAME),
                 "infrared_entity_id": infrared_entity_id,
-                "infrared_entity_exists": (
-                    isinstance(infrared_entity_id, str)
-                    and (state := hass.states.get(infrared_entity_id)) is not None
-                    and state.state != STATE_UNAVAILABLE
+                "infrared_entity_exists": infrared_state is not None,
+                "infrared_entity_available": (
+                    infrared_state is not None
+                    and infrared_state.state != STATE_UNAVAILABLE
                 ),
+                "device_type": device_type,
+                "codeset": item.get(CONF_REMOTE_CODESET, NO_INFRARED_LIBRARY_CODESET),
+                "media_player_expected": device_type == DEVICE_TYPE_TV,
+                "button_count": button_count,
+                "source_count": source_count,
                 "command_count": len(commands) if isinstance(commands, dict) else 0,
-                "commands": sorted(commands) if isinstance(commands, dict) else [],
+                "commands": command_names,
             }
         )
 

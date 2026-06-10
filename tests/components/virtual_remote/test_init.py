@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from homeassistant.components.virtual_remote import _async_update_listener
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
 from tests.common import MockConfigEntry
@@ -12,7 +13,7 @@ async def test_setup_and_unload_entry(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
 ) -> None:
-    """Test setup forwards remote platform and unloads it."""
+    """Test setup forwards platforms and unloads them."""
     with (
         patch.object(
             hass.config_entries,
@@ -31,8 +32,12 @@ async def test_setup_and_unload_entry(
         assert await hass.config_entries.async_unload(config_entry.entry_id)
         await hass.async_block_till_done()
 
-    mock_forward.assert_called_once_with(config_entry, ["remote"])
-    mock_unload.assert_called_once_with(config_entry, ["remote"])
+    mock_forward.assert_called_once_with(
+        config_entry, [Platform.BUTTON, Platform.MEDIA_PLAYER, Platform.REMOTE]
+    )
+    mock_unload.assert_called_once_with(
+        config_entry, [Platform.BUTTON, Platform.MEDIA_PLAYER, Platform.REMOTE]
+    )
 
 
 async def test_options_update_listener_reloads_entry(

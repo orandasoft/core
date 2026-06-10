@@ -15,7 +15,7 @@ rules:
   brands:
     status: exempt
     comment: |
-      This helper integration does not require dedicated branding assets.
+      This device-style integration currently does not require dedicated branding assets.
 
   common-modules:
     status: done
@@ -37,7 +37,7 @@ rules:
   dependency-transparency:
     status: exempt
     comment: |
-      This integration has no external Python package dependencies.
+      The integration declares a dependency on the infrared integration. The shared infrared_protocols package is owned by the infrared integration.
 
   docs-actions:
     status: exempt
@@ -48,19 +48,20 @@ rules:
   docs-high-level-description:
     status: done
     comment: |
-      The integration documentation explains that Virtual Remote creates remote
-      entities backed by infrared entities.
+      Documentation describes Virtual Remote as a user-defined infrared-controlled
+      device backed by an existing infrared entity.
 
   docs-installation-instructions:
     status: done
     comment: |
-      The integration documentation includes UI setup steps and prerequisites.
+      Documentation explains that users add Virtual Remote from the UI and select
+      the infrared entity that transmits commands.
 
   docs-removal-instructions:
     status: done
     comment: |
-      The integration documentation explains how to delete the integration and
-      what data is removed.
+      Documentation explains that removing the config entry removes the virtual
+      remote device and its entities.
 
   entity-event-setup:
     status: done
@@ -83,7 +84,7 @@ rules:
   runtime-data:
     status: exempt
     comment: |
-      This helper integration does not create or maintain a runtime API client
+      This integration does not create or maintain a runtime API client
       or coordinator that needs to be stored in entry.runtime_data.
 
   test-before-configure:
@@ -95,7 +96,7 @@ rules:
   test-before-setup:
     status: exempt
     comment: |
-      This helper integration has no external API connection to validate before
+      This integration has no external API connection to validate before
       setup. Linked infrared entity availability is represented by entity
       availability and repair issues at runtime.
 
@@ -107,16 +108,16 @@ rules:
 
   # Silver
   action-exceptions:
-    status: done
+    status: todo
     comment: |
-      Standardize all service errors with translated HomeAssistantError
-      exceptions.
+      Review all user-facing service exceptions and add dedicated translation
+      keys where needed.
 
   config-entry-unloading:
     status: done
     comment: |
-      The integration unloads the forwarded remote platform on config entry
-      unload.
+      The integration unloads forwarded remote, button, and media_player platforms
+      on config entry unload.
 
   diagnostics:
     status: done
@@ -125,12 +126,12 @@ rules:
       payload data redacted.
 
   docs-configuration-parameters:
-    status: done
+    status: todo
     comment: |
       Expand documentation for all options-flow configuration parameters.
 
   docs-installation-parameters:
-    status: done
+    status: todo
     comment: |
       Expand documentation for all config-flow fields.
 
@@ -154,8 +155,8 @@ rules:
   parallel-updates:
     status: done
     comment: |
-      The remote platform sets PARALLEL_UPDATES to avoid unnecessary update
-      throttling for service-only helper entities.
+      Entity platforms set PARALLEL_UPDATES appropriately for service-style
+      entities backed by an existing infrared entity.
 
   reauthentication-flow:
     status: exempt
@@ -171,8 +172,10 @@ rules:
   stale-devices:
     status: done
     comment: |
-      The remote platform cleans up stale entity and device registry entries for
-      virtual remotes removed from the config entry options.
+      The remote platform cleans up stale remote entity and device registry entries.
+      The button platform cleans up stale button entities for commands no longer
+      exposed as buttons, and the media_player platform cleans up stale TV media
+      player entities when a remote is no longer configured as a TV.
 
   strict-typing:
     status: todo
@@ -195,13 +198,13 @@ rules:
   discovery:
     status: exempt
     comment: |
-      This is a helper integration. There is no physical device or network
-      service to discover.
+      Virtual Remote devices are user-defined and backed by existing infrared
+      entities, so there is no physical device or network service to discover.
 
   discovery-update-info:
     status: exempt
     comment: |
-      This helper integration has no discovery information to update.
+      This integration has no discovery information to update.
 
   docs-data-update:
     status: exempt
@@ -210,41 +213,40 @@ rules:
       linked infrared entity.
 
   docs-examples:
-    status: done
+    status: todo
     comment: |
-      Documentation includes automation examples, command sequences,
-      repeat and delay examples, and raw command usage.
+      Add complete automation examples, command sequence examples, repeat and
+      delay examples, and raw command usage examples.
 
   docs-known-limitations:
-    status: done
+    status: todo
     comment: |
-      Documentation describes integration limitations including hardware
-      dependencies, lack of infrared learning, and infrared backend
-      requirements.
+      Add documentation for limitations such as assumed-state IR sending, lack
+      of infrared learning, and dependence on the linked infrared entity.
 
   docs-supported-devices:
     status: exempt
     comment: |
-      This integration is not tied to a specific physical device. It supports
-      Home Assistant infrared entities.
+      This integration creates user-defined infrared-controlled devices backed
+      by Home Assistant infrared entities.
 
   docs-supported-functions:
-    status: done
+    status: todo
     comment: |
-      Documentation covers supported remote services, command formats,
-      repeat handling, delays, and named command behavior.
+      Expand documentation for supported remote, button, and TV media_player
+      behavior.
 
   docs-troubleshooting:
-    status: done
+    status: todo
     comment: |
-      Documentation includes troubleshooting guidance for unavailable
-      infrared entities, invalid commands, and configuration issues.
+      Add troubleshooting guidance for unavailable infrared entities, invalid
+      commands, and configuration issues.
 
   docs-use-cases:
-    status: done
+    status: todo
     comment: |
-      Documentation includes automation, scripting, reusable command,
-      and raw infrared transmission use cases.
+      Add documentation for automation, scripting, reusable command, and raw
+      infrared transmission use cases.
 
   dynamic-devices:
     status: done
@@ -255,35 +257,40 @@ rules:
   entity-category:
     status: exempt
     comment: |
-      This integration only provides primary user-facing remote entities.
+      This integration provides primary user-facing remote, media_player, and
+      command button entities.
 
   entity-device-class:
     status: exempt
     comment: |
-      The remote platform does not use device classes for these entities.
+      The media_player platform uses the TV device class for TV remotes. The
+      remote and button platforms do not use device classes for these entities.
 
   entity-disabled-by-default:
     status: exempt
     comment: |
-      The configured virtual remote is the primary entity created by this helper
-      integration and should be enabled by default.
+      The configured virtual remote, TV media_player, and explicitly enabled
+      command buttons are primary user-facing entities and should be enabled by
+      default.
 
   entity-translations:
     status: exempt
     comment: |
-      The remote entity uses the configured device name and does not define
-      translated entity names.
+      Remote and media_player entities use the configured device name. Command
+      button names are generated from user-defined command names.
 
   exception-translations:
-    status: done
+    status: todo
     comment: |
-      User-facing HomeAssistantError exceptions use translation keys in
-      strings.json.
+      Add dedicated translation keys for all service-parameter validation
+      messages before claiming this rule.
 
   icon-translations:
     status: exempt
     comment: |
-      The integration does not define custom icons.
+      The integration uses dynamic icons for command buttons based on command
+      names rather than static icon translations. The TV media_player uses the
+      platform device class icon behavior.
 
   reconfiguration-flow:
     status: done
@@ -295,7 +302,8 @@ rules:
   async-dependency:
     status: exempt
     comment: |
-      This integration has no external dependency.
+      This integration depends on the Home Assistant infrared integration and has
+      no direct external runtime client dependency.
 
   inject-websession:
     status: exempt

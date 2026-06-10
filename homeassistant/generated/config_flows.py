@@ -23,7 +23,6 @@ FLOWS = {
         "tod",
         "trend",
         "utility_meter",
-        "virtual_remote",
     ],
     "integration": [
         "abode",
@@ -814,6 +813,7 @@ FLOWS = {
         "victron_gx",
         "victron_remote_monitoring",
         "vilfo",
+        "virtual_remote",
         "vistapool",
         "vivotek",
         "vizio",

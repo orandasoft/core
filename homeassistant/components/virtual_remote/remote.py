@@ -5,7 +5,6 @@ from collections.abc import Callable, Iterable, Mapping
 import logging
 from typing import Any
 
-from homeassistant.components import infrared
 from homeassistant.components.remote import RemoteEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE
@@ -16,7 +15,6 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .command import parse_remote_command as _parse_remote_command
 from .const import (
     CONF_INFRARED_ENTITY_ID,
     CONF_REMOTE_COMMANDS,
@@ -26,12 +24,13 @@ from .const import (
     DEFAULT_NUM_REPEATS,
     DOMAIN,
 )
-from .helpers import virtual_remotes_from_config_entry
+from .helpers import normalize_command_mapping, virtual_remotes_from_config_entry
 from .repairs import (
     async_create_linked_infrared_entity_missing_issue,
     async_delete_linked_infrared_entity_missing_issue,
     async_delete_stale_linked_infrared_entity_missing_issues,
 )
+from .send import async_send_infrared_command
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,18 +48,11 @@ type RestoredInfraredEntityIssueHandler = Callable[[HomeAssistant, str], None]
 
 
 def _as_str_mapping(value: Any) -> dict[str, str] | None:
-    """Return valid string items from a mapping or None when not a mapping."""
+    """Return a normalized command-name-to-payload mapping."""
     if not isinstance(value, Mapping):
         return None
 
-    result: dict[str, str] = {}
-    for key, item in value.items():
-        if not isinstance(key, str) or not isinstance(item, str):
-            _LOGGER.debug("Ignoring malformed virtual remote command entry")
-            continue
-        result[key] = item
-
-    return result
+    return normalize_command_mapping(value)
 
 
 def remote_unique_id(entry_id: str, remote_id: str) -> str:
@@ -505,21 +497,6 @@ class InfraredRemoteEntity(RemoteEntity):
             command_is_configured = False
             raw_command = command
 
-        try:
-            ir_command = _parse_remote_command(
-                raw_command,
-                kwargs or {},
-                translation_domain=self._translation_domain,
-            )
-        except HomeAssistantError as err:
-            if not command_is_configured:
-                raise HomeAssistantError(
-                    translation_domain=self._translation_domain,
-                    translation_key="remote_unknown_or_invalid_command",
-                    translation_placeholders={"command": command},
-                ) from err
-            raise
-
         entity_id = self._resolve_infrared_entity_id()
 
         hass = getattr(self, "hass", None)
@@ -531,15 +508,22 @@ class InfraredRemoteEntity(RemoteEntity):
             )
 
         try:
-            await infrared.async_send_command(hass, entity_id, ir_command)
-        except asyncio.CancelledError, HomeAssistantError:
-            raise
-        except Exception as err:
-            raise HomeAssistantError(
+            await async_send_infrared_command(
+                hass,
+                entity_id,
+                raw_command,
+                parse_kwargs=kwargs or {},
                 translation_domain=self._translation_domain,
-                translation_key="remote_send_failed",
-                translation_placeholders={"error": str(err)},
-            ) from err
+                check_available=False,
+            )
+        except HomeAssistantError as err:
+            if not command_is_configured:
+                raise HomeAssistantError(
+                    translation_domain=self._translation_domain,
+                    translation_key="remote_unknown_or_invalid_command",
+                    translation_placeholders={"command": command},
+                ) from err
+            raise
 
     def _resolve_infrared_entity_id(self) -> str:
         """Return the configured backing infrared entity id."""

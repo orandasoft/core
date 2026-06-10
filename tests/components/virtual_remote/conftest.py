@@ -8,9 +8,10 @@ import pytest
 from homeassistant.components.virtual_remote.const import (
     CONF_INFRARED_ENTITY_ID,
     CONF_REMOTE_COMMANDS,
+    CONF_REMOTE_DEVICE_TYPE,
     CONF_REMOTE_ID,
     CONF_REMOTE_NAME,
-    CONF_VIRTUAL_REMOTES,
+    DEVICE_TYPE_TV,
     DOMAIN,
 )
 from homeassistant.core import HomeAssistant
@@ -65,20 +66,18 @@ def config_entry(hass: HomeAssistant, infrared_entity: str) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Virtual Remote",
-        data={},
+        data={
+            CONF_REMOTE_ID: REMOTE_ID,
+            CONF_REMOTE_NAME: REMOTE_NAME,
+            CONF_INFRARED_ENTITY_ID: infrared_entity,
+            CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_TV,
+        },
         options={
-            CONF_VIRTUAL_REMOTES: [
-                {
-                    CONF_REMOTE_ID: REMOTE_ID,
-                    CONF_REMOTE_NAME: REMOTE_NAME,
-                    CONF_INFRARED_ENTITY_ID: infrared_entity,
-                    CONF_REMOTE_COMMANDS: {
-                        "POWER_ON": RAW_COMMAND,
-                        "POWER_OFF": RAW_COMMAND,
-                        "TOGGLE": RAW_COMMAND,
-                    },
-                }
-            ]
+            CONF_REMOTE_COMMANDS: {
+                "POWER_ON": RAW_COMMAND,
+                "POWER_OFF": RAW_COMMAND,
+                "TOGGLE": RAW_COMMAND,
+            },
         },
         unique_id=DOMAIN,
     )

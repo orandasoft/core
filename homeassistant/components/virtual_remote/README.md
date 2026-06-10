@@ -1,97 +1,87 @@
 # Virtual Remote
 
-The Virtual Remote integration creates Home Assistant `remote` entities backed by existing Home Assistant `infrared` entities.
+The Virtual Remote integration creates infrared-controlled Home Assistant devices backed by existing Home Assistant `infrared` entities.
 
-It allows infrared command sets to be grouped into reusable remote entities while infrared transmission remains handled by the linked infrared integration.
+A virtual remote does not communicate with infrared hardware directly. It stores named infrared commands and asks the linked `infrared` entity to transmit them.
 
-This makes it possible to use one infrared transmitter for multiple devices such as TVs, AV receivers, projectors, or air conditioners.
+This makes it possible to use one infrared transmitter for multiple logical devices, such as TVs, receivers, projectors, or other infrared-controlled equipment.
 
 ---
 
 ## Requirements
 
-Virtual Remote requires at least one Home Assistant `infrared` entity provided by another integration.
+Virtual Remote requires at least one Home Assistant `infrared` entity from another integration.
 
 The linked `infrared` entity is responsible for transmitting infrared commands through compatible hardware such as IR blasters or infrared emitters.
 
-Compatible integrations include any integration that exposes Home Assistant `infrared` entities.
+---
 
-Examples include:
-- iTach IP2IR
-- ESPHome infrared transmitters
-- any integration exposing Home Assistant `infrared` entities
+## Entities
+
+Each configured virtual remote creates a `remote` entity.
+
+Depending on the configured device type and commands, it can also create:
+
+- `button` entities for commands where button creation is enabled.
+- a `media_player` entity for TV remotes.
+
+The TV media player is assumed-state. Its supported controls are derived from the commands configured for the virtual remote.
 
 ---
 
-## Features
+## Device types and codesets
 
-- Create one virtual remote entity per config entry
-- Associate each virtual remote with any Home Assistant `infrared` entity
-- Edit a virtual remote's name or linked infrared entity
-- Use standard Home Assistant `remote` services
-- Store named infrared commands
-- Add, edit, and remove commands through the options flow
-- Support multiple infrared command formats
-- Reuse one infrared transmitter across multiple virtual remotes
+Virtual remotes can be configured as a generic remote or as a supported device type such as TV.
+
+Device type controls which device-oriented entities can be created. For example, TV remotes create a TV `media_player` entity.
+
+A codeset is an optional infrared command library profile. Codesets are filtered by device type and can be used to import commands during setup or later from the options flow.
 
 ---
 
-## Supported Command Formats
+## Commands
 
-The integration supports the same command formats as the iTach IP2IR remote functionality.
+Commands are named infrared payloads. Command names are normalized to uppercase with underscores.
 
-Supported formats include:
+Supported command payload formats include:
+
 - Pronto Hex
-- Raw timing lists
-- Raw timing objects
-- Text-based timing formats
+- raw timing lists
+- raw timing objects
+- text-based timing formats
+
+Commands may also be imported from a supported infrared library codeset.
 
 ---
 
-## Configuration
+## Buttons
 
-### Adding a Virtual Remote
+Command button entities are optional. When adding or importing commands, the flow can create button entities for those commands.
 
-1. Go to **Settings** → **Devices & services** → **Add integration**.
-2. Search for **Virtual Remote**.
-3. Select the infrared entity to use.
-4. Enter a name for the virtual remote.
-
-Each setup flow creates one virtual remote config entry. To create another virtual remote, add the Virtual Remote integration again.
+Buttons are regular Home Assistant `button` entities. Pressing a button sends the stored infrared command through the linked infrared entity.
 
 ---
 
-## Managing a Virtual Remote
+## TV media player
 
-Open a Virtual Remote config entry's options to:
-- Edit the virtual remote name or linked infrared entity
-- Manage commands
+TV remotes create a `media_player` entity. The media player does not provide real TV state; it exposes supported features based on configured command names.
 
-If a virtual remote points to an infrared entity that no longer exists, the options flow still allows the remote to be edited and associated with a different infrared entity.
+Examples:
 
----
-
-## Managing Commands
-
-Commands are managed through the virtual remote config entry options flow.
-
-Available operations:
-- Add command
-- Edit command
-- Remove command
-
-Command names are normalized to uppercase with underscores.
+- `POWER_ON` enables turn on.
+- `POWER_OFF` enables turn off.
+- `VOLUME_UP` and `VOLUME_DOWN` enable volume step.
+- `MUTE` enables mute.
+- `CHANNEL_UP` and `CHANNEL_DOWN` enable next and previous track.
+- `PLAY`, `PAUSE`, and `STOP` enable playback controls.
+- source commands such as `HDMI_1`, `TV`, `DTV`, `BS`, or app shortcuts can appear in the source list.
 
 ---
 
-## Remote Services
-
-The integration uses the standard Home Assistant `remote` entity services.
-
-Example:
+## Remote service example
 
 ```yaml
-service: remote.send_command
+action: remote.send_command
 target:
   entity_id: remote.living_room_tv
 data:
@@ -102,12 +92,14 @@ data:
 
 ## Availability
 
-A virtual remote is available when its linked infrared entity is available.
+Virtual Remote entities are available when the linked infrared entity exists and is available.
+
+If the linked infrared entity is missing or unavailable, the integration creates a repair issue to help the user update the configuration.
 
 ---
 
 ## Notes
 
 - Multiple virtual remote config entries may share the same infrared entity.
-- The integration does not directly communicate with physical hardware.
+- Existing commands are not deleted automatically when changing device type or codeset.
 - Infrared transmission is handled by the linked infrared integration.

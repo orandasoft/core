@@ -1,6 +1,5 @@
 """Tests for virtual remote entities."""
 
-import asyncio
 from collections.abc import Iterable, Mapping
 from typing import Any, cast
 from unittest.mock import AsyncMock, Mock, patch
@@ -8,11 +7,12 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from homeassistant.components.virtual_remote.const import (
+    CONF_COMMAND_CREATE_BUTTON,
+    CONF_COMMAND_DATA,
     CONF_INFRARED_ENTITY_ID,
     CONF_REMOTE_COMMANDS,
     CONF_REMOTE_ID,
     CONF_REMOTE_NAME,
-    CONF_VIRTUAL_REMOTES,
     DOMAIN,
 )
 from homeassistant.components.virtual_remote.remote import (
@@ -29,7 +29,6 @@ from homeassistant.components.virtual_remote.remote import (
     cleanup_stale_missing_infrared_issues,
     cleanup_stale_remote_entities,
     cleanup_stale_virtual_remote_devices,
-    configured_remote_definitions,
     remote_unique_id,
 )
 from homeassistant.const import STATE_UNAVAILABLE
@@ -43,6 +42,16 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .conftest import INFRARED_ENTITY_ID, RAW_COMMAND, REMOTE_ID, REMOTE_NAME
 
 from tests.common import MockConfigEntry
+
+
+def _command_object(
+    command_data: str, *, create_button: bool = False
+) -> dict[str, object]:
+    """Return the stored command-object shape."""
+    return {
+        CONF_COMMAND_DATA: command_data,
+        CONF_COMMAND_CREATE_BUTTON: create_button,
+    }
 
 
 def _device_info_factory(
@@ -142,21 +151,6 @@ def test_standalone_repair_issue_helpers(hass: HomeAssistant) -> None:
     delete_issue.assert_called_once_with(hass, remote_id=REMOTE_ID)
 
 
-def test_configured_remote_definitions(config_entry: MockConfigEntry) -> None:
-    """Test configured remote definition helper."""
-    assert (
-        configured_remote_definitions(config_entry)
-        == config_entry.options[CONF_VIRTUAL_REMOTES]
-    )
-
-    bad_entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={},
-        options={CONF_VIRTUAL_REMOTES: "bad"},
-    )
-    assert configured_remote_definitions(bad_entry) == []
-
-
 async def test_async_setup_entry_adds_entities(
     hass: HomeAssistant,
     config_entry: MockConfigEntry,
@@ -207,105 +201,6 @@ async def test_async_setup_virtual_remote_entities_shared_options(
     entity = entities[0]
     assert entity.name == REMOTE_NAME
     assert entity._translation_domain == "itachip2ir"
-
-
-async def test_async_setup_skips_malformed_and_duplicate_remotes(
-    hass: HomeAssistant,
-    infrared_entity: str,
-) -> None:
-    """Test malformed remote entries are skipped."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={},
-        options={
-            CONF_VIRTUAL_REMOTES: [
-                {
-                    CONF_REMOTE_ID: "valid",
-                    CONF_REMOTE_NAME: "Valid",
-                    CONF_INFRARED_ENTITY_ID: infrared_entity,
-                },
-                {
-                    CONF_REMOTE_ID: "valid",
-                    CONF_REMOTE_NAME: "Duplicate",
-                    CONF_INFRARED_ENTITY_ID: infrared_entity,
-                },
-                {
-                    CONF_REMOTE_ID: "bad",
-                    CONF_REMOTE_NAME: "Bad",
-                    CONF_INFRARED_ENTITY_ID: infrared_entity,
-                    CONF_REMOTE_COMMANDS: {"POWER": 1},
-                },
-                "bad",
-            ]
-        },
-    )
-    entry.add_to_hass(hass)
-    entities: list[InfraredRemoteEntity] = []
-
-    await async_setup_virtual_remote_entities(
-        hass,
-        entry,
-        _add_remote_entities_callback(entities),
-        device_info_factory=_device_info_factory,
-    )
-
-    assert [entity.unique_id for entity in entities] == [
-        f"{entry.entry_id}_remote_valid",
-        f"{entry.entry_id}_remote_bad",
-    ]
-
-
-async def test_async_setup_keeps_remote_with_invalid_command_entries(
-    hass: HomeAssistant,
-    infrared_entity: str,
-) -> None:
-    """Test invalid command entries do not drop an otherwise valid remote."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={},
-        options={
-            CONF_VIRTUAL_REMOTES: [
-                {
-                    CONF_REMOTE_ID: "valid",
-                    CONF_REMOTE_NAME: "Valid",
-                    CONF_INFRARED_ENTITY_ID: infrared_entity,
-                    CONF_REMOTE_COMMANDS: {"POWER": RAW_COMMAND, "BAD": 1},
-                },
-                {
-                    CONF_REMOTE_ID: "bad_commands",
-                    CONF_REMOTE_NAME: "Bad commands",
-                    CONF_INFRARED_ENTITY_ID: infrared_entity,
-                    CONF_REMOTE_COMMANDS: "bad",
-                },
-            ]
-        },
-    )
-    entry.add_to_hass(hass)
-    entities: list[InfraredRemoteEntity] = []
-
-    await async_setup_virtual_remote_entities(
-        hass,
-        entry,
-        _add_remote_entities_callback(entities),
-        device_info_factory=_device_info_factory,
-    )
-
-    assert [entity.unique_id for entity in entities] == [
-        f"{entry.entry_id}_remote_valid",
-        f"{entry.entry_id}_remote_bad_commands",
-    ]
-    entities[0].hass = hass
-    entities[1].hass = hass
-
-    with patch(
-        "homeassistant.components.virtual_remote.remote.infrared.async_send_command"
-    ) as mock_send:
-        await entities[0].async_send_command(["POWER"])
-
-    mock_send.assert_called_once()
-
-    with pytest.raises(HomeAssistantError):
-        await entities[1].async_send_command(["POWER"])
 
 
 async def test_cleanup_stale_remote_entities(
@@ -491,7 +386,7 @@ async def test_power_methods_send_configured_commands(
 
     with (
         patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
+            "homeassistant.components.virtual_remote.send.infrared.async_send_command",
             AsyncMock(),
         ) as mock_send,
         patch.object(entity, "async_write_ha_state"),
@@ -513,7 +408,7 @@ async def test_toggle_uses_power_toggle_fallback(
 
     with (
         patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
+            "homeassistant.components.virtual_remote.send.infrared.async_send_command",
             AsyncMock(),
         ) as mock_send,
         patch.object(entity, "async_write_ha_state"),
@@ -533,7 +428,7 @@ async def test_power_methods_no_configured_command_noop(
 
     with (
         patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
+            "homeassistant.components.virtual_remote.send.infrared.async_send_command",
             AsyncMock(),
         ) as mock_send,
         patch.object(entity, "async_write_ha_state"),
@@ -555,7 +450,7 @@ async def test_send_command_named_raw_repeat_and_delay(
 
     with (
         patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
+            "homeassistant.components.virtual_remote.send.infrared.async_send_command",
             AsyncMock(),
         ) as mock_send,
         patch(
@@ -609,7 +504,7 @@ async def test_send_command_non_string_command(
 
     with (
         patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
+            "homeassistant.components.virtual_remote.send.infrared.async_send_command",
             AsyncMock(),
         ) as mock_send,
         pytest.raises(HomeAssistantError) as err,
@@ -741,46 +636,6 @@ async def test_send_command_without_hass_raises_missing_infrared() -> None:
     assert err.value.translation_key == "remote_infrared_missing"
 
 
-async def test_send_command_preserves_home_assistant_error(
-    hass: HomeAssistant,
-    infrared_entity: str,
-) -> None:
-    """Test HomeAssistantError raised by infrared send is preserved."""
-    entity = _make_entity(hass, commands={"POWER": RAW_COMMAND})
-    expected = HomeAssistantError("boom")
-
-    with (
-        patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
-            AsyncMock(side_effect=expected),
-        ),
-        pytest.raises(HomeAssistantError) as err,
-    ):
-        await entity.async_send_command(["POWER"])
-
-    assert err.value is expected
-
-
-async def test_send_failure_wrapped(
-    hass: HomeAssistant,
-    infrared_entity: str,
-) -> None:
-    """Test unexpected infrared send errors are wrapped."""
-    entity = _make_entity(hass, commands={"POWER": RAW_COMMAND})
-
-    with (
-        patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
-            AsyncMock(side_effect=RuntimeError("boom")),
-        ),
-        pytest.raises(HomeAssistantError) as err,
-    ):
-        await entity.async_send_command(["POWER"])
-
-    assert err.value.translation_key == "remote_send_failed"
-    assert err.value.translation_placeholders == {"error": "boom"}
-
-
 async def test_async_setup_entry_supports_single_entry_remote_data(
     hass: HomeAssistant,
     infrared_entity: str,
@@ -879,23 +734,6 @@ async def test_async_setup_virtual_remote_entities_skips_malformed_and_duplicate
     assert [entity.unique_id for entity in entities] == [
         f"{entry.entry_id}_remote_valid"
     ]
-
-
-async def test_send_command_reraises_cancelled_error(
-    hass: HomeAssistant,
-    infrared_entity: str,
-) -> None:
-    """Test cancellation is not wrapped as a send failure."""
-    entity = _make_entity(hass)
-
-    with (
-        patch(
-            "homeassistant.components.virtual_remote.remote.infrared.async_send_command",
-            side_effect=asyncio.CancelledError,
-        ),
-        pytest.raises(asyncio.CancelledError),
-    ):
-        await entity.async_send_command(["38000:1,2"])
 
 
 def test_virtual_remote_device_info_factory() -> None:

@@ -2,28 +2,36 @@
 
 from collections.abc import Mapping
 from typing import Any, cast
+from unittest.mock import patch
 
 import voluptuous as vol
 
 from homeassistant.components.virtual_remote.const import (
+    CONF_COMMAND_CREATE_BUTTON,
+    CONF_COMMAND_DATA,
     CONF_INFRARED_ENTITY_ID,
+    CONF_REMOTE_CODESET,
     CONF_REMOTE_COMMANDS,
+    CONF_REMOTE_DEVICE_TYPE,
     CONF_REMOTE_ID,
     CONF_REMOTE_NAME,
-    CONF_VIRTUAL_REMOTES,
+    DEVICE_TYPE_GENERIC,
+    DEVICE_TYPE_TV,
 )
 from homeassistant.components.virtual_remote.helpers import (
     available_infrared_entities,
+    command_create_button,
+    command_object,
     command_options,
+    command_payload,
     find_command_key,
     infrared_entity_field,
     infrared_entity_field_with_current,
     infrared_entity_selector,
+    normalize_command_mapping,
     normalize_command_name,
+    normalize_command_objects,
     normalize_remote_id,
-    normalize_virtual_remotes,
-    remote_options,
-    remotes_with_commands,
     unique_remote_id,
     virtual_remote_from_config_entry_data,
     virtual_remotes_from_config_entry,
@@ -159,67 +167,114 @@ def test_find_command_key_case_insensitive() -> None:
     assert find_command_key(commands, "MISSING") is None
 
 
-def test_normalize_virtual_remotes() -> None:
-    """Test stored option normalization."""
-    value: list[object] = [
-        {
-            CONF_REMOTE_ID: "valid",
-            CONF_REMOTE_NAME: "Valid",
-            CONF_INFRARED_ENTITY_ID: "infrared.valid",
-            CONF_REMOTE_COMMANDS: {"POWER": "payload", "BAD": 1},
-            "extra": "ignored",
-        },
-        {
-            CONF_REMOTE_ID: "valid",
-            CONF_REMOTE_NAME: "Duplicate",
-            CONF_INFRARED_ENTITY_ID: "infrared.dup",
-        },
-        {
-            CONF_REMOTE_ID: "",
-            CONF_REMOTE_NAME: "Invalid",
-            CONF_INFRARED_ENTITY_ID: "infrared.invalid",
-        },
-        "invalid",
-    ]
+def test_command_payload_helpers() -> None:
+    """Test command payload and button helper branches."""
+    assert command_payload("38000:1,2") == "38000:1,2"
+    assert command_payload(123) is None
+    assert command_payload({CONF_COMMAND_DATA: "38000:3,4"}) == "38000:3,4"
+    assert command_payload({CONF_COMMAND_DATA: ""}) is None
 
-    assert normalize_virtual_remotes(value) == [
+    assert command_create_button({CONF_COMMAND_CREATE_BUTTON: True}) is True
+    assert command_create_button({CONF_COMMAND_CREATE_BUTTON: False}) is False
+    assert command_create_button("38000:1,2") is False
+
+    assert command_object("38000:1,2", create_button=True) == {
+        CONF_COMMAND_DATA: "38000:1,2",
+        CONF_COMMAND_CREATE_BUTTON: True,
+    }
+
+
+def test_normalize_command_objects_and_mapping() -> None:
+    """Test command object and payload normalization."""
+    commands = {
+        "POWER_ON": "38000:1,2",
+        "POWER_OFF": {
+            CONF_COMMAND_DATA: "38000:3,4",
+            CONF_COMMAND_CREATE_BUTTON: True,
+        },
+        "EMPTY_STRING": "",
+        "EMPTY_DATA": {CONF_COMMAND_DATA: ""},
+        "NOT_MAPPING": 123,
+        "NO_DATA": {CONF_COMMAND_CREATE_BUTTON: True},
+        1: "ignored",
+        "": "ignored",
+    }
+
+    assert normalize_command_objects(commands) == {
+        "POWER_ON": {
+            CONF_COMMAND_DATA: "38000:1,2",
+            CONF_COMMAND_CREATE_BUTTON: False,
+        },
+        "POWER_OFF": {
+            CONF_COMMAND_DATA: "38000:3,4",
+            CONF_COMMAND_CREATE_BUTTON: True,
+        },
+    }
+    assert normalize_command_mapping(commands) == {
+        "POWER_ON": "38000:1,2",
+        "POWER_OFF": "38000:3,4",
+    }
+
+
+def test_virtual_remote_infers_device_type_from_codeset() -> None:
+    """Test codeset device type is inferred for generic remotes."""
+    assert virtual_remote_from_config_entry_data(
         {
-            CONF_REMOTE_ID: "valid",
-            CONF_REMOTE_NAME: "Valid",
-            CONF_INFRARED_ENTITY_ID: "infrared.valid",
-            CONF_REMOTE_COMMANDS: {"POWER": "payload"},
+            CONF_REMOTE_ID: "tv",
+            CONF_REMOTE_NAME: "TV",
+            CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
+            CONF_REMOTE_CODESET: "lg_tv",
+            CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_GENERIC,
         }
-    ]
-    assert normalize_virtual_remotes("invalid") == []
+    ) == {
+        CONF_REMOTE_ID: "tv",
+        CONF_REMOTE_NAME: "TV",
+        CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
+        CONF_REMOTE_CODESET: "lg_tv",
+        CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_TV,
+    }
 
 
-def test_remote_and_command_options() -> None:
-    """Test options helpers."""
-    remotes: list[dict[str, object]] = [
+def test_virtual_remote_preserves_matching_codeset_device_type() -> None:
+    """Test matching stored device type and codeset are preserved."""
+    assert virtual_remote_from_config_entry_data(
         {
-            CONF_REMOTE_ID: "one",
-            CONF_REMOTE_NAME: "One",
-            CONF_INFRARED_ENTITY_ID: "infrared.one",
-        },
-        {
-            CONF_REMOTE_ID: "two",
-            CONF_REMOTE_NAME: "Two",
-            CONF_INFRARED_ENTITY_ID: "infrared.two",
-            CONF_REMOTE_COMMANDS: {"B": "payload", "A": "payload"},
-        },
-    ]
+            CONF_REMOTE_ID: "tv",
+            CONF_REMOTE_NAME: "TV",
+            CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
+            CONF_REMOTE_CODESET: "lg_tv",
+            CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_TV,
+        }
+    ) == {
+        CONF_REMOTE_ID: "tv",
+        CONF_REMOTE_NAME: "TV",
+        CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
+        CONF_REMOTE_CODESET: "lg_tv",
+        CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_TV,
+    }
 
-    normalized_remotes = normalize_virtual_remotes(remotes)
 
-    assert remote_options(normalized_remotes) == [
-        {"value": "one", "label": "One"},
-        {"value": "two", "label": "Two"},
-    ]
-    assert command_options({"B": "payload", "A": "payload"}) == [
-        {"value": "A", "label": "A"},
-        {"value": "B", "label": "B"},
-    ]
-    assert remotes_with_commands(normalized_remotes) == [normalized_remotes[1]]
+def test_virtual_remote_drops_codeset_when_device_type_conflicts() -> None:
+    """Test conflicting stored device type drops the codeset."""
+    with patch(
+        "homeassistant.components.virtual_remote.helpers."
+        "validate_infrared_library_device_type",
+        return_value=True,
+    ):
+        assert virtual_remote_from_config_entry_data(
+            {
+                CONF_REMOTE_ID: "projector",
+                CONF_REMOTE_NAME: "Projector",
+                CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
+                CONF_REMOTE_CODESET: "lg_tv",
+                CONF_REMOTE_DEVICE_TYPE: "projector",
+            }
+        ) == {
+            CONF_REMOTE_ID: "projector",
+            CONF_REMOTE_NAME: "Projector",
+            CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
+            CONF_REMOTE_DEVICE_TYPE: "projector",
+        }
 
 
 def test_infrared_entity_field_omits_unavailable_default() -> None:
@@ -281,13 +336,20 @@ def test_virtual_remote_from_config_entry_data() -> None:
             CONF_REMOTE_ID: "tv",
             CONF_REMOTE_NAME: "TV",
             CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
+            CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_GENERIC,
             CONF_REMOTE_COMMANDS: {"POWER_ON": "38000:1,2", 1: "bad"},
         }
     ) == {
         CONF_REMOTE_ID: "tv",
         CONF_REMOTE_NAME: "TV",
         CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
-        CONF_REMOTE_COMMANDS: {"POWER_ON": "38000:1,2"},
+        CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_GENERIC,
+        CONF_REMOTE_COMMANDS: {
+            "POWER_ON": {
+                CONF_COMMAND_DATA: "38000:1,2",
+                CONF_COMMAND_CREATE_BUTTON: False,
+            }
+        },
     }
 
 
@@ -303,35 +365,6 @@ def test_virtual_remote_from_config_entry_data_rejects_malformed_data() -> None:
         )
         is None
     )
-
-
-def test_virtual_remotes_from_config_entry_prefers_options_list() -> None:
-    """Test config entry remote normalization prefers the current options list."""
-    entry = MockConfigEntry(
-        domain="virtual_remote",
-        data={
-            CONF_REMOTE_ID: "single",
-            CONF_REMOTE_NAME: "Single",
-            CONF_INFRARED_ENTITY_ID: "infrared.single",
-        },
-        options={
-            CONF_VIRTUAL_REMOTES: [
-                {
-                    CONF_REMOTE_ID: "list",
-                    CONF_REMOTE_NAME: "List",
-                    CONF_INFRARED_ENTITY_ID: "infrared.list",
-                }
-            ]
-        },
-    )
-
-    assert virtual_remotes_from_config_entry(entry) == [
-        {
-            CONF_REMOTE_ID: "list",
-            CONF_REMOTE_NAME: "List",
-            CONF_INFRARED_ENTITY_ID: "infrared.list",
-        }
-    ]
 
 
 def test_virtual_remotes_from_config_entry_supports_single_entry_data() -> None:
@@ -351,7 +384,13 @@ def test_virtual_remotes_from_config_entry_supports_single_entry_data() -> None:
             CONF_REMOTE_ID: "tv",
             CONF_REMOTE_NAME: "TV",
             CONF_INFRARED_ENTITY_ID: "infrared.test_ir",
-            CONF_REMOTE_COMMANDS: {"POWER_ON": "38000:1,2"},
+            CONF_REMOTE_DEVICE_TYPE: DEVICE_TYPE_GENERIC,
+            CONF_REMOTE_COMMANDS: {
+                "POWER_ON": {
+                    CONF_COMMAND_DATA: "38000:1,2",
+                    CONF_COMMAND_CREATE_BUTTON: False,
+                }
+            },
         }
     ]
 
@@ -371,28 +410,3 @@ def test_virtual_remotes_from_config_entry_rejects_malformed_single_entry_data()
     )
 
     assert virtual_remotes_from_config_entry(entry) == []
-
-
-def test_virtual_remotes_from_config_entry_supports_data_list_storage() -> None:
-    """Test config entry remote normalization supports legacy list in entry data."""
-    entry = MockConfigEntry(
-        domain="virtual_remote",
-        data={
-            CONF_VIRTUAL_REMOTES: [
-                {
-                    CONF_REMOTE_ID: "data_remote",
-                    CONF_REMOTE_NAME: "Data Remote",
-                    CONF_INFRARED_ENTITY_ID: "infrared.data_ir",
-                }
-            ]
-        },
-        options={},
-    )
-
-    assert virtual_remotes_from_config_entry(entry) == [
-        {
-            CONF_REMOTE_ID: "data_remote",
-            CONF_REMOTE_NAME: "Data Remote",
-            CONF_INFRARED_ENTITY_ID: "infrared.data_ir",
-        }
-    ]

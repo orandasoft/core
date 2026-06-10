@@ -7764,6 +7764,12 @@
       "config_flow": true,
       "iot_class": "local_polling"
     },
+    "virtual_remote": {
+      "name": "Virtual Remote",
+      "integration_type": "device",
+      "config_flow": true,
+      "iot_class": "assumed_state"
+    },
     "vistapool": {
       "name": "Vistapool",
       "integration_type": "hub",
@@ -8482,12 +8488,6 @@
       "iot_class": "calculated"
     },
     "utility_meter": {
-      "integration_type": "helper",
-      "config_flow": true,
-      "iot_class": "local_push"
-    },
-    "virtual_remote": {
-      "name": "Virtual Remote",
       "integration_type": "helper",
       "config_flow": true,
       "iot_class": "local_push"

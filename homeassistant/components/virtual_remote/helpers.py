@@ -11,11 +11,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
+    CONF_COMMAND_CREATE_BUTTON,
+    CONF_COMMAND_DATA,
     CONF_INFRARED_ENTITY_ID,
+    CONF_REMOTE_CODESET,
     CONF_REMOTE_COMMANDS,
+    CONF_REMOTE_DEVICE_TYPE,
     CONF_REMOTE_ID,
     CONF_REMOTE_NAME,
-    CONF_VIRTUAL_REMOTES,
+    DEVICE_TYPE_GENERIC,
+)
+from .infrared_library import (
+    infrared_library_codeset_device_type,
+    validate_infrared_library_device_type,
 )
 
 _REMOTE_ID_RE = re.compile(r"[^a-z0-9_]+")
@@ -138,6 +146,33 @@ def normalize_command_name(name: str) -> str:
     return value.strip("_")
 
 
+def command_payload(command: Any) -> str | None:
+    """Return command payload from a stored command value."""
+    if isinstance(command, str) and command:
+        return command
+
+    if not isinstance(command, Mapping):
+        return None
+
+    data = command.get(CONF_COMMAND_DATA)
+    return data if isinstance(data, str) and data else None
+
+
+def command_create_button(command: Any) -> bool:
+    """Return whether a stored command should expose a button entity."""
+    return (
+        isinstance(command, Mapping) and command.get(CONF_COMMAND_CREATE_BUTTON) is True
+    )
+
+
+def command_object(command_data: str, *, create_button: bool) -> dict[str, Any]:
+    """Return a stored command object."""
+    return {
+        CONF_COMMAND_DATA: command_data,
+        CONF_COMMAND_CREATE_BUTTON: create_button,
+    }
+
+
 def find_command_key(
     commands: Mapping[str, Any],
     normalized_command_name: str,
@@ -177,7 +212,10 @@ def virtual_remote_from_config_entry_data(
         CONF_INFRARED_ENTITY_ID: infrared_entity_id,
     }
 
-    commands = _normalize_command_mapping(value.get(CONF_REMOTE_COMMANDS, {}))
+    _copy_optional_codeset(value, remote)
+    _copy_optional_device_type(value, remote)
+
+    commands = normalize_command_objects(value.get(CONF_REMOTE_COMMANDS, {}))
     if commands:
         remote[CONF_REMOTE_COMMANDS] = commands
 
@@ -185,21 +223,7 @@ def virtual_remote_from_config_entry_data(
 
 
 def virtual_remotes_from_config_entry(entry: ConfigEntry) -> list[dict[str, Any]]:
-    """Return virtual remote definitions from current or single-entry storage.
-
-    The standalone Virtual Remote integration is moving toward one virtual
-    remote per config entry. The shared remote entity setup still consumes a
-    list so it can also support integrations, such as iTach IP2IR, where one
-    hardware config entry owns multiple virtual remotes.
-    """
-    remotes = normalize_virtual_remotes(entry.options.get(CONF_VIRTUAL_REMOTES))
-    if remotes:
-        return remotes
-
-    remotes = normalize_virtual_remotes(entry.data.get(CONF_VIRTUAL_REMOTES))
-    if remotes:
-        return remotes
-
+    """Return the single virtual remote definition for a config entry."""
     single_remote = virtual_remote_from_config_entry_data(
         {
             **entry.data,
@@ -209,84 +233,98 @@ def virtual_remotes_from_config_entry(entry: ConfigEntry) -> list[dict[str, Any]
     return [single_remote] if single_remote is not None else []
 
 
-def normalize_virtual_remotes(value: Any) -> list[dict[str, Any]]:
-    """Return normalized virtual remote definitions from stored options."""
-    if not isinstance(value, list):
-        return []
-
-    remotes: list[dict[str, Any]] = []
-    seen_remote_ids: set[str] = set()
-
-    for item in value:
-        if not isinstance(item, Mapping):
-            continue
-
-        remote_id = item.get(CONF_REMOTE_ID)
-        name = item.get(CONF_REMOTE_NAME)
-        infrared_entity_id = item.get(CONF_INFRARED_ENTITY_ID)
-
-        if (
-            not isinstance(remote_id, str)
-            or not remote_id
-            or not isinstance(name, str)
-            or not name
-            or not isinstance(infrared_entity_id, str)
-            or not infrared_entity_id
-            or remote_id in seen_remote_ids
-        ):
-            continue
-
-        remote: dict[str, Any] = {
-            CONF_REMOTE_ID: remote_id,
-            CONF_REMOTE_NAME: name,
-            CONF_INFRARED_ENTITY_ID: infrared_entity_id,
-        }
-
-        commands = _normalize_command_mapping(item.get(CONF_REMOTE_COMMANDS, {}))
-        if commands:
-            remote[CONF_REMOTE_COMMANDS] = commands
-
-        remotes.append(remote)
-        seen_remote_ids.add(remote_id)
-
-    return remotes
-
-
-def remotes_with_commands(remotes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return remotes which have at least one named command."""
-    return [
-        remote
-        for remote in remotes
-        if _normalize_command_mapping(remote.get(CONF_REMOTE_COMMANDS, {}))
-    ]
-
-
 def command_options(commands: Mapping[str, Any]) -> list[selector.SelectOptionDict]:
     """Return selector options for command names."""
     return [
         selector.SelectOptionDict(value=command_name, label=command_name)
-        for command_name in sorted(_normalize_command_mapping(commands))
+        for command_name in sorted(normalize_command_mapping(commands))
     ]
 
 
-def remote_options(remotes: list[dict[str, Any]]) -> list[selector.SelectOptionDict]:
-    """Return selector options for remotes."""
-    return [
-        selector.SelectOptionDict(
-            value=str(remote[CONF_REMOTE_ID]),
-            label=str(remote[CONF_REMOTE_NAME]),
-        )
-        for remote in remotes
-    ]
+def normalize_command_mapping(value: Any) -> dict[str, str]:
+    """Return a normalized command-name-to-payload mapping."""
+    return {
+        key: payload
+        for key, command in normalize_command_objects(value).items()
+        if (payload := command_payload(command)) is not None
+    }
 
 
-def _normalize_command_mapping(value: Any) -> dict[str, str]:
-    """Return a normalized command mapping."""
+def normalize_command_objects(value: Any) -> dict[str, dict[str, Any]]:
+    """Return normalized command objects."""
     if not isinstance(value, Mapping):
         return {}
 
-    return {
-        key: item
-        for key, item in value.items()
-        if isinstance(key, str) and key and isinstance(item, str)
-    }
+    commands: dict[str, dict[str, Any]] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key:
+            continue
+
+        if isinstance(item, str) and item:
+            commands[key] = command_object(item, create_button=False)
+            continue
+
+        if not isinstance(item, Mapping):
+            continue
+
+        data = item.get(CONF_COMMAND_DATA)
+        if not isinstance(data, str) or not data:
+            continue
+
+        commands[key] = command_object(
+            data,
+            create_button=item.get(CONF_COMMAND_CREATE_BUTTON) is True,
+        )
+
+    return commands
+
+
+def _copy_optional_device_type(
+    source: Mapping[str, Any],
+    remote: dict[str, Any],
+) -> None:
+    """Copy or infer a virtual remote device type."""
+    device_type = source.get(CONF_REMOTE_DEVICE_TYPE)
+    stored_device_type = (
+        device_type
+        if isinstance(device_type, str)
+        and validate_infrared_library_device_type(device_type)
+        else None
+    )
+
+    codeset = remote.get(CONF_REMOTE_CODESET)
+    codeset_device_type = (
+        infrared_library_codeset_device_type(codeset)
+        if isinstance(codeset, str)
+        else None
+    )
+
+    if codeset_device_type is not None:
+        if stored_device_type is None or stored_device_type == DEVICE_TYPE_GENERIC:
+            remote[CONF_REMOTE_DEVICE_TYPE] = codeset_device_type
+            return
+
+        if stored_device_type == codeset_device_type:
+            remote[CONF_REMOTE_DEVICE_TYPE] = stored_device_type
+            return
+
+        remote.pop(CONF_REMOTE_CODESET, None)
+        remote[CONF_REMOTE_DEVICE_TYPE] = stored_device_type
+        return
+
+    remote.pop(CONF_REMOTE_CODESET, None)
+    remote[CONF_REMOTE_DEVICE_TYPE] = stored_device_type or DEVICE_TYPE_GENERIC
+
+
+def _copy_optional_codeset(
+    source: Mapping[str, Any],
+    remote: dict[str, Any],
+) -> None:
+    """Copy a valid infrared library codeset into a remote definition."""
+    codeset = source.get(CONF_REMOTE_CODESET)
+    if (
+        isinstance(codeset, str)
+        and codeset
+        and infrared_library_codeset_device_type(codeset) is not None
+    ):
+        remote[CONF_REMOTE_CODESET] = codeset
